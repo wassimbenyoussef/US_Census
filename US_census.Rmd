@@ -1,0 +1,214 @@
+---
+title: "US census"
+author: "Wassim BEN YOUSSEF"
+date: "29 avril 2017"
+output: word_document
+---
+### Statistical Analysis
+
+## General statistical analysis of the dataset
+ 
+ First, we add a header to the datasets to recognize the columns. Then, I plot the histograms for all the features to observe their distribution. Finally, I calculate the number of missing values for each column and the percentages of missing values.
+
+```{r }
+library(gridExtra)
+library(graphics)
+setwd("c:/Users/wassim/Desktop/dataiku_project")
+initial_data <- read.table("./census_income_learn.csv",sep=",",header=FALSE, na.strings=c(""," ","NA","?"," ?"))
+test_data <-  read.table("./census_income_test.csv",sep=",",header=FALSE, na.strings=c(""," ","NA","?"," ?"))
+
+namesofcolumns <- c("age","class_of_worker","industry_code","occupationcode","education","wage_per_hour","enrolled_in_edu_inst_last_wk","marital_status","major_industry_code","major_occupation_code","race","hispanic_Origin","sex","member_of_a_labor_union","reason_for_unemployment","full_or_part_time_employment_stat","capital_gains","capital_losses","divdends_from_stocks","tax_filer_status","region_of_previous_residence","state_of_previous_residence","detailed_household_and_family_stat","detailed_household_summary_in_household","instance_weight","migration_code-change_in_msa","migration_code-change_in_reg","migration_code-move_within_reg","live_in_this_house_1_year_ago","migration_prev_res_in_sunbelt","num_persons_worked_for_employers","family_members_under_18","country_of_birth_father","country_of_birth_mother","country_of_birth_self","citizenship","own_business_or_self employed","fill_inc_questionnaire_for_veterans_admin", "Veterans_benefits","Weeks_worked_in_the_year","Year","Y")
+
+colnames(initial_data) <- namesofcolumns
+colnames(test_data) <- namesofcolumns
+summary(initial_data)
+par(mfrow=c(1,1))
+num_columns = c(1,3,4,6,17,18,19,25,31,37,39,40,41)
+for( i in 1:ncol(initial_data)){
+  if(is.element(i,num_columns)){
+    hist(initial_data[,i],main = namesofcolumns[i])
+  }
+  else{
+    plot(initial_data[,i],main = namesofcolumns[i])
+  }
+}
+
+nb_missing<-sapply(initial_data, function(x) sum(length(which(is.na(x)))))
+nb_missing
+missing_val <- data.frame(nb_missing/nrow(initial_data)*100)
+colnames(missing_val) <- c("% of NAs")
+grid.arrange(tableGrob(missing_val))
+```
+
+## Categorical variables analysis
+ The pie-chart is a good visual tool to observe the distribution of categorical variables. However, it is more complicated to read it when the feature contains a high number of instances.
+
+```{r echo=FALSE}
+
+for (i in 1:ncol(initial_data)){
+  if(!(is.element(i,num_columns))){
+    mytable <- table(initial_data[,i])
+
+    pct <- round(mytable/sum(mytable)*100)
+    lbls <- paste(names(mytable), pct)
+    lbls <- paste(lbls, "%", sep="")
+    pie(mytable, labels = lbls, col=rainbow(length(lbls)),
+    main=namesofcolumns[i])
+  }
+  
+}
+
+
+```
+## Continuous variables analysis
+# Correlation
+ For the continuous variables, we calculate their correlations and we plot them in a heatmap. We can then observe a high positive correlation when the color between two features is close to the red (for instance veterans benefits and age, Weeks worked in the year and industry code), negatively correlated when close to the blue and not correlated when close to the white.  
+```{r echo=FALSE}
+#install.packages("GGally")
+library(GGally)
+are.factor  <-sapply(initial_data, is.factor)
+col<- colorRampPalette(c("blue", "white", "red"))(20)
+mcor = cor(initial_data[, !are.factor])
+heatmap(mcor,col = col, main="Correlation heatmap", symm = TRUE)
+
+
+```
+# Skewness and Kurtosis
+
+The skewness and the Kurtosis allow to compare the distribution of a variable to usual distributions as Uniform distribution or Normal Distribution. The kurtosis measures the "tailedeness" and here we can observe that the Kurtosis of Occupation code is close to the Kurtosis of a Wigner semi-circle distribution (-1). 
+```{r echo=FALSE}
+continuous_data <- initial_data[,!are.factor]
+library(e1071)
+library(gridExtra)
+skew_kurto <- data.frame(c(0,0))
+
+for( i in 1:ncol(continuous_data)){
+
+    skew_kurto[i,1] <- skewness(continuous_data[,i])
+    skew_kurto[i,2] <- kurtosis(continuous_data[,i])
+    skew_kurto[i,3] <- names(continuous_data)[i]
+}
+colnames(skew_kurto) <- c("skewness","Kurtosis","Variables")
+grid.arrange(tableGrob(skew_kurto))
+
+```
+
+
+# Box-Plots and extreme values
+```{r echo=FALSE}
+library(gridExtra)
+for( i in 1:ncol(continuous_data)){
+  boxplot(continuous_data[,i],main=names(continuous_data[,i]))
+}
+info_continuous_variables <- data.frame(c(0))
+for (i in 1:ncol(continuous_data)){
+  info_continuous_variables[i,1] <- max(continuous_data[,i], na.rm = TRUE)
+  info_continuous_variables[i,2] <- min(continuous_data[,i], na.rm = TRUE)
+  info_continuous_variables[i,3] <- mean(continuous_data[,i], na.rm = TRUE)
+  info_continuous_variables[i,4] <- median(continuous_data[,i], na.rm = TRUE)
+  info_continuous_variables[i,5] <- names(continuous_data)[i]
+  
+}
+colnames(info_continuous_variables) <- c("max","min","mean","median","variables")
+grid.arrange(tableGrob(info_continuous_variables))
+```
+### Prediction
+
+ 
+## Variables selection
+
+Before building the prediction models, I used a variable selector which finds the best attributes according to the correlation and the entropy measures. Four variables where then selected as the best ones (occupationcode, capital_gains, capital_losses and divdends_from_stocks) and I used these ones for Logistic Regression and SVM models built in the next sections. I also wanted to use another variable selector based on consistency measure to have another "point-of-view" but the running time was too long. These variables indicate that the final Income is highly correlated to the profession as well as the investissment in stock exchanges and in capital. 
+```{r echo=FALSE}
+#install.packages("FSelector")
+library(FSelector)
+library(rpart)
+subset_cfs <- cfs(Y~., initial_data)
+f_cfs <- as.simple.formula(subset_cfs, "Y")
+print(f_cfs)
+#Takes too much time to run
+#subset_consistency <- consistency(Y~., initial_data)   
+#f_consistency <- as.simple.formula(subset, "Y")
+#print(f_consistency)
+
+```
+
+##Logistic regression
+
+To build the logistic regression model, I usethe cross-validation method to find the best parameters. The cross-validation will automatically divide the dataset into 10 fold-partitions from which 9 would be used for training and 1 for test. All the samples are used for both training and testing. The accuracy found for the overall dataset was 94.44%.
+```{r echo=FALSE}
+#install.packages("caret")
+library(caret)
+cross_val <- trainControl(method = "repeatedcv", number = 10, savePredictions = TRUE)
+model_lr <- train(Y ~ occupationcode + capital_gains + capital_losses + divdends_from_stocks,  data=initial_data, method="glm", family="binomial",
+                 trControl = cross_val, tuneLength = 5)
+pred_lr = predict(model_lr, newdata=initial_data)
+confusionMatrix(data=pred_lr, initial_data$Y)
+
+```
+## Decision Tree
+I  built a first decision tree using the variables selected before. However, when plotting it, we can see that only one variable was used ("Capital_gains"). So I built a second one with all the variables. I began by building a simple decision tree, then I optimised it using prune, by minimzing the "CP error", which is the cross-validation error. The tree also gives a hierarchy of the variables importance, and we do not have the same results as the ones provided by the variable selector. The accuracy obtained is 94.85 %, which is higher than the one obtained with Logistic Regression.
+```{r echo=FALSE}
+library(rpart)
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+
+first_tree <- rpart(Y ~ occupationcode + capital_gains + capital_losses + divdends_from_stocks,
+data=initial_data,method="class")
+first_optimized_tree<- prune(tree,cp= first_tree$cptable[which.min(tree$cptable[,"xerror"]),"CP"])
+fancyRpartPlot(first_optimized_tree, uniform=TRUE,main="Optimal Tree")
+
+second_tree <- rpart(Y ~ .,data=initial_data,method="class")
+bestcp = second_tree$cptable[which.min(second_tree$cptable[,"xerror"]),"CP"]
+second_optimized_tree<- prune(second_tree,cp= bestcp)
+fancyRpartPlot(second_optimized_tree, uniform=TRUE,main="Optimal Tree")
+data_prediction_tree <- initial_data[,-42]
+pred_tree <- predict(second_optimized_tree, data_prediction_tree, type="class" )
+
+confusionMatrix(data=pred_tree,initial_data$Y)
+```
+## Support Vector Machine
+Here, I wanted to use the SVM algorithm, which is known for its good results when dealing with binary classification. However, the running time was very long, so I show you the code but I comment it. To fix this issue, I could run the model only on a sample of the overall dataset. To build the SVM model, I also used cross-validation method with less folders to avoid a long running time, but even with just two folders it was too long.
+```{r echo=FALSE}
+#library(e1071)
+#set.seed(300)
+#cross_val2 <- trainControl(method = "repeatedcv", number = 2, savePredictions = TRUE)
+#model_svm <- train(Y~occupationcode + capital_gains + capital_losses + divdends_from_stocks, data=initial_data, method = "svmLinear", trControl = cross_val2)
+#pred_svm = predict(model_svm, newdata=initial_data)
+#confusionMatrix(data=pred_svm, initial_data$Y)
+
+```
+##Random Forest
+
+ Here, I wanted to use random forest with cross-validation by using the function rfcv which has the advantages of doing a variable selection and a cross-validation. However, the running time was too long (I encountered the same issue with a simple random forest).To create the model, I wanted to use all the variables without missing values, but a better way would be to replace all the missing values with a random value among all the possibilities (all the instances of the feature).
+```{r echo=FALSE}
+#library(randomForest)
+#train_rf <- subset(initial_data, select = #c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,23,24,25,29,30,32,36,37,38,39,40,41))
+
+#missing_value<-sapply(train_rf, function(x) sum(length(which(is.na(x)))))
+#missing_value
+#train_rf$migration_prev_res_in_sunbelt <- NULL
+#Y_rf <- initial_data$Y
+#rf_model <- rfcv(train_rf, Y_rf, cv.fold=2)
+#with(rf_model, plot(n.var, error.cv, log="x", type="o", lwd=2))
+#rf_model$n.var
+#rf_model$error.cv
+
+```
+
+
+
+## Final evaluation
+I expected Random Forest or SVM to be the best models, but because the running time was too long, I will make the final prediction with the Decision Tree model, with which I had a better accuracy than with Logistic Regression. We finally obtain an accuracy of 94.8%, which we can consider as very good.
+```{r echo=FALSE}
+#pred_rf_test = predict(rf_model, new_data=test_data)
+#confusionMatrix(data=pred_rf_test, test_data$Y)
+data_test_prediction <- test_data[,-42]
+pred_tree_test = predict(second_optimized_tree, data_test_prediction, type="class")
+confusionMatrix(data=pred_tree_test, test_data$Y)
+
+
+```
+
+### Further Work
+In order to have a better model, we might use more variables and spend some time to wrangle and modify the features to extract more informations from them (for instance: classify the feature "age" into 5 categories (0-20 years, 21-40 years, 41-60 years, 61-80 years, 81< years)). Moreover, we could do a Principal Component Analysis on the continuous variables in order to cluster them into less features with more information. An MCA could also be done on categorical variables for the same reasons. I also might use Neural Networks which are very efficient for pattern recognition.
